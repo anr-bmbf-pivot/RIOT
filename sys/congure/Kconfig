@@ -10,6 +10,7 @@ menu "CongURE congestion control abstraction"
 
 rsource "mock/Kconfig"
 rsource "quic/Kconfig"
+rsource "reno/Kconfig"
 rsource "test/Kconfig"
 
 endmenu # CongURE congestion control abstraction
@@ -24,6 +25,7 @@ if MODULE_CONGURE
 
 rsource "mock/Kconfig"
 rsource "quic/Kconfig"
+rsource "reno/Kconfig"
 rsource "test/Kconfig"
 
 endif   # MODULE_CONGURE
