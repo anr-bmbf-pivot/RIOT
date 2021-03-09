@@ -23,6 +23,7 @@
 #endif
 #include "net/gnrc/neterr.h"
 #include "net/gnrc/netif/internal.h"
+#include "net/gnrc/netif/pktq.h"
 #include "net/gnrc/pkt.h"
 #include "net/gnrc/sixlowpan.h"
 #include "net/gnrc/sixlowpan/config.h"
@@ -790,9 +791,51 @@ static uint16_t _find_offset_and_copy_rest(uint8_t *data, gnrc_pktsnip_t **pkt,
 static bool _send_frame(gnrc_pktsnip_t *frame, gnrc_sixlowpan_frag_fb_t *fbuf,
                         void *ctx, unsigned page)
 {
-    uint32_t now = xtimer_now_usec();
+    uint32_t now;
+    uint32_t if_gap;
     uint32_t if_gap = gnrc_sixlowpan_frag_sfr_congure_snd_inter_frame_gap(fbuf);
 
+    if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_ECN) &&
+        (sixlowpan_sfr_rfrag_is(frame->next->data))) {
+        int queue_state = 0;
+        int queue_size = 0;
+
+        if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_ECN_IF_IN)) {
+            gnrc_netif_t *netif = gnrc_netif_hdr_get_netif(frame->data);
+
+            assert(frame->type == GNRC_NETTYPE_NETIF);
+            assert(frame->next->type == GNRC_NETTYPE_SIXLOWPAN);
+            queue_state = msg_avail_thread(netif->pid);
+            queue_size = msg_queue_capacity(netif->pid);
+            assert(queue_size > 0);
+
+            if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_IN_DEN) >
+                (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_IN_NUM)) {
+                sixlowpan_sfr_set_ecn(frame->next->data);
+            }
+        }
+
+        if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_ECN_IF_OUT)) {
+            queue_state = gnrc_netif_pktq_usage();
+            queue_size = CONFIG_GNRC_NETIF_PKTQ_POOL_SIZE;
+
+            if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_OUT_DEN) >
+                (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_OUT_NUM)) {
+                sixlowpan_sfr_set_ecn(frame->next->data);
+            }
+        }
+
+        if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_ECN_FQUEUE)) {
+            queue_state = clist_count(&_frame_queue);
+            queue_size = FRAME_QUEUE_POOL_SIZE;
+
+            if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_FQUEUE_DEN) >
+                (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_FQUEUE_NUM)) {
+                sixlowpan_sfr_set_ecn(frame->next->data);
+            }
+        }
+    }
+    now = xtimer_now_usec();
     if ((if_gap == 0) || ((now - _last_frame_sent) > if_gap)) {
         DEBUG("6lo sfr: dispatch frame to network interface\n");
         _last_frame_sent = now;
