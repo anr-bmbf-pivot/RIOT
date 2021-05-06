@@ -41,6 +41,8 @@
 #define ENABLE_DEBUG    0
 #include "debug.h"
 
+#include "app.h"
+
 #define FRAG_DESCS_POOL_SIZE    (CONFIG_GNRC_SIXLOWPAN_FRAG_FB_SIZE * \
                                  CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE)
 #define FRAME_QUEUE_POOL_SIZE   (FRAG_DESCS_POOL_SIZE + \
@@ -97,6 +99,13 @@ static const gnrc_sixlowpan_frag_sfr_bitmap_t _full_bitmap = { .u32 = UINT32_MAX
 static const gnrc_sixlowpan_frag_sfr_bitmap_t _null_bitmap = { .u32 = 0U };
 
 static gnrc_sixlowpan_frag_sfr_stats_t _stats;
+static unsigned _fbuf_entries = 0;
+
+#define LOG_CONGURE(type, fbuf) \
+    APP_LOG(type ";%u;%u;%u;%u;%" PRIu32 "\n", \
+            _fbuf_entries, CONFIG_GNRC_SIXLOWPAN_FRAG_FB_SIZE, \
+            (fbuf)->tag, (fbuf)->sfr.congure->cwnd, \
+            gnrc_sixlowpan_frag_sfr_congure_snd_inter_frame_gap(fbuf))
 
 /**
  * @brief   Converts a @ref sys_bitmap based bitmap to a
@@ -327,7 +336,9 @@ void gnrc_sixlowpan_frag_sfr_send(gnrc_pktsnip_t *pkt, void *ctx,
 
     if (fbuf->offset == 0) {
         DEBUG("6lo sfr: sending first fragment\n");
+        _fbuf_entries++;
         gnrc_sixlowpan_frag_sfr_congure_snd_setup(fbuf);
+        LOG_CONGURE("ci", fbuf);
         res = _send_1st_fragment(netif, fbuf, page);
         if (res == 0) {
             DEBUG("6lo sfr: error sending first fragment\n");
@@ -363,6 +374,7 @@ void gnrc_sixlowpan_frag_sfr_send(gnrc_pktsnip_t *pkt, void *ctx,
         goto error;
     }
     gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf);
+    LOG_CONGURE("cs", fbuf);
     fbuf->offset += res;
 
     if (gnrc_sixlowpan_frag_sfr_congure_snd_in_cwnd(fbuf) &&
@@ -373,6 +385,7 @@ void gnrc_sixlowpan_frag_sfr_send(gnrc_pktsnip_t *pkt, void *ctx,
         /* go back offset to not send abort on first fragment */
         fbuf->offset -= res;
         gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_discard(fbuf);
+        LOG_CONGURE("cd", fbuf);
         goto error;
     }
     /* check if last fragment sent requested an ACK */
@@ -469,7 +482,9 @@ static int _report_non_ack_req_window_sent(clist_node_t *node, void *fbuf_ptr)
 {
     _frag_desc_t *frag_desc = (_frag_desc_t *)node;
     if (!_frag_ack_req(frag_desc)) {
-        gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf_ptr);
+        gnrc_sixlowpan_frag_fb_t *fbuf = fbuf_ptr;
+        gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf);
+        LOG_CONGURE("cs", fbuf);
     }
     return 0;
 }
@@ -490,6 +505,7 @@ void gnrc_sixlowpan_frag_sfr_arq_timeout(gnrc_sixlowpan_frag_fb_t *fbuf)
     }
     if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE) && frag_desc) {
         gnrc_sixlowpan_frag_sfr_congure_snd_report_frags_timeout(fbuf);
+        LOG_CONGURE("ct", fbuf);
         _shrink_window(fbuf);
         frag_desc = (_frag_desc_t *)fbuf->sfr.window.next;
     }
@@ -539,6 +555,7 @@ void gnrc_sixlowpan_frag_sfr_arq_timeout(gnrc_sixlowpan_frag_fb_t *fbuf)
                     else {
                         if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)) {
                             gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf);
+                            LOG_CONGURE("cs", fbuf);
                         }
                         if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_STATS)) {
                             /* fragment was resent successfully, note this done
@@ -792,7 +809,6 @@ static bool _send_frame(gnrc_pktsnip_t *frame, gnrc_sixlowpan_frag_fb_t *fbuf,
                         void *ctx, unsigned page)
 {
     uint32_t now;
-    uint32_t if_gap;
     uint32_t if_gap = gnrc_sixlowpan_frag_sfr_congure_snd_inter_frame_gap(fbuf);
 
     if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_ECN) &&
@@ -811,7 +827,9 @@ static bool _send_frame(gnrc_pktsnip_t *frame, gnrc_sixlowpan_frag_fb_t *fbuf,
 
             if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_IN_DEN) >
                 (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_IN_NUM)) {
-                sixlowpan_sfr_set_ecn(frame->next->data);
+                sixlowpan_sfr_t *hdr = frame->next->data;
+                APP_LOG("ei;%u;%d;%d\n", hdr->tag, queue_state, queue_size);
+                sixlowpan_sfr_set_ecn(hdr);
             }
         }
 
@@ -821,7 +839,9 @@ static bool _send_frame(gnrc_pktsnip_t *frame, gnrc_sixlowpan_frag_fb_t *fbuf,
 
             if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_OUT_DEN) >
                 (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_IF_OUT_NUM)) {
-                sixlowpan_sfr_set_ecn(frame->next->data);
+                sixlowpan_sfr_t *hdr = frame->next->data;
+                APP_LOG("eo;%u;%d;%d\n", hdr->tag, queue_state, queue_size);
+                sixlowpan_sfr_set_ecn(hdr);
             }
         }
 
@@ -831,7 +851,9 @@ static bool _send_frame(gnrc_pktsnip_t *frame, gnrc_sixlowpan_frag_fb_t *fbuf,
 
             if ((queue_state * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_FQUEUE_DEN) >
                 (queue_size * CONFIG_GNRC_SIXLOWPAN_SFR_ECN_FQUEUE_NUM)) {
-                sixlowpan_sfr_set_ecn(frame->next->data);
+                sixlowpan_sfr_t *hdr = frame->next->data;
+                APP_LOG("eg;%u;%d;%d\n", hdr->tag, queue_state, queue_size);
+                sixlowpan_sfr_set_ecn(hdr);
             }
         }
     }
@@ -1214,10 +1236,13 @@ static int _resend_failed_frag(clist_node_t *node, void *fbuf_ptr)
     int res = _resend_frag(node, fbuf_ptr);
 
     if (res == 0) {
+        gnrc_sixlowpan_frag_fb_t *fbuf = fbuf_ptr;
+
         if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_STATS)) {
             _stats.fragment_resends.by_nack++;
         }
-        gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf_ptr);
+        gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(fbuf);
+        LOG_CONGURE("cs", fbuf);
     }
     return res;
 }
@@ -1257,6 +1282,7 @@ static void _check_failed_frags(sixlowpan_sfr_ack_t *ack,
                 gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_acked(
                     fbuf, &frag_desc->super, &ack
                 );
+                LOG_CONGURE("ca", fbuf);
             }
         }
         else {
@@ -1279,6 +1305,7 @@ static void _check_failed_frags(sixlowpan_sfr_ack_t *ack,
                     gnrc_sixlowpan_frag_sfr_congure_snd_report_ecn(
                         fbuf, earliest_send
                     );
+                    LOG_CONGURE("ce", fbuf);
                 }
                 clist_rpush(&_frag_descs_free, &frag_desc->super.super);
                 /* retry to resend whole datagram */
@@ -1290,6 +1317,7 @@ static void _check_failed_frags(sixlowpan_sfr_ack_t *ack,
     if (IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE) &&
         sixlowpan_sfr_ecn(&ack->base)) {
         gnrc_sixlowpan_frag_sfr_congure_snd_report_ecn(fbuf, earliest_send);
+        LOG_CONGURE("ce", fbuf);
     }
     /* all fragments were received of the current window were received and
      * the datagram was transmitted completely */
@@ -1304,6 +1332,7 @@ static void _check_failed_frags(sixlowpan_sfr_ack_t *ack,
             fbuf,
             (congure_snd_msg_t *)&not_received
         );
+        LOG_CONGURE("cl", fbuf);
         fbuf->sfr.window = not_received;
         _shrink_window(fbuf);
         assert(fbuf->sfr.frags_sent == clist_count(&fbuf->sfr.window));
@@ -1362,10 +1391,12 @@ static void _clean_up_fbuf(gnrc_sixlowpan_frag_fb_t *fbuf, int error)
 {
     DEBUG("6lo sfr: removing fragmentation buffer entry for datagram %u\n",
           fbuf->tag);
+    LOG_CONGURE("cx", fbuf);
     _clean_slate_datagram(fbuf);
     gnrc_sixlowpan_frag_sfr_congure_snd_destroy(fbuf);
     gnrc_pktbuf_release_error(fbuf->pkt, error);
     fbuf->pkt = NULL;
+    _fbuf_entries--;
 }
 
 static uint16_t _send_1st_fragment(gnrc_netif_t *netif,
@@ -1581,6 +1612,9 @@ static void _retry_datagram(gnrc_sixlowpan_frag_fb_t *fbuf)
         /* return fragmentation buffer to its original state to resend the whole
          * datagram again */
         _clean_slate_datagram(fbuf);
+        /* decrement entries counter so it can be incremented again by
+         * gnrc_sixlowpan_frag_sfr_send on offset 0 */
+        _fbuf_entries--;
         gnrc_sixlowpan_frag_sfr_send(fbuf->pkt, fbuf, 0);
     }
 }
