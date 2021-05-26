@@ -1,0 +1,428 @@
+From c73224af647c0a39560cb3826ec90313e0ffadc4 Mon Sep 17 00:00:00 2001
+From: Martine Lenders <m.lenders@fu-berlin.de>
+Date: Wed, 26 May 2021 11:22:47 +0200
+Subject: [PATCH] gnrc_sixlowpan_frag_sfr: unroll congure_abe
+
+---
+ .../net/gnrc/sixlowpan/frag/sfr/congure.h     | 271 +++++++++---------
+ .../net/gnrc/sixlowpan/frag/sfr_types.h       |  14 +-
+ 2 files changed, 151 insertions(+), 134 deletions(-)
+
+diff --git a/sys/include/net/gnrc/sixlowpan/frag/sfr/congure.h b/sys/include/net/gnrc/sixlowpan/frag/sfr/congure.h
+index 071b2cf002..b27e52c1a6 100644
+--- a/sys/include/net/gnrc/sixlowpan/frag/sfr/congure.h
++++ b/sys/include/net/gnrc/sixlowpan/frag/sfr/congure.h
+@@ -18,12 +18,15 @@
+ #ifndef NET_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_H
+ #define NET_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_H
+ 
++#include <assert.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+ 
+ #include "congure.h"
++#include "congure/abe.h"
+ #include "kernel_defines.h"
+ #include "net/gnrc/sixlowpan/frag/sfr.h"
++#include "seq.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -34,56 +37,6 @@ extern "C" {
+  */
+ #define GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT    (1U)
+ 
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE) || DOXYGEN
+-/**
+- * @brief   Retrieve CongURE state object from a pool of free objects
+- *
+- * Needs to be defined in for a each CongURE implementation `congure_x` e.g. as
+- * a sub-module `gnrc_sixlowpan_frag_sfr_congure_x` and call the respective
+- * `congure_x_snd_setup` function when a free object is available for that
+- * object. As such, congure_snd_t::driver == NULL can be used as an identifier
+- * if a state object is free.
+- *
+- * The pool of objects has to have an initial size of at least
+- * @ref CONFIG_GNRC_SIXLOWPAN_FRAG_FB_SIZE.
+- *
+- * The window unit is @ref GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT.
+- *
+- * @return  A CongURE state object on success
+- * @return  NULL, if no free CongURE state object is available (including when
+- *          when module `gnrc_sixlowpan_frag_sfr_congure` is not included).
+- */
+-congure_snd_t *gnrc_sixlowpan_frag_sfr_congure_snd_get(void);
+-#else
+-static inline congure_snd_t *gnrc_sixlowpan_frag_sfr_congure_snd_get(void)
+-{
+-    return NULL;
+-}
+-#endif
+-
+-/**
+- * @brief   Frees the CongURE state object
+- *
+- * This makes a CongURE state object retrievable with
+- * @ref gnrc_sixlowpan_frag_sfr_congure_snd_get again.
+- *
+- * @pre CongURE object is not NULL when called with module
+- *      `gnrc_sixlowpan_frag_sfr_congure` used.
+- *
+- * @param[in] c     A CongURE state object
+- *
+- * @note    Does not do anything without the module
+- *          `gnrc_sixlowpan_frag_sfr_congure`
+- */
+-static inline void gnrc_sixlowpan_frag_sfr_congure_snd_free(congure_snd_t *c)
+-{
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    c->driver = NULL;
+-#else
+-    (void)c;
+-#endif
+-}
+-
+ /**
+  * @brief   Frees the CongURE state object of a fragmentation buffer and set's
+  *          it to `NULL`
+@@ -96,28 +49,24 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_free(congure_snd_t *c)
+ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_destroy(gnrc_sixlowpan_frag_fb_t *fb)
+ {
+ #if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    gnrc_sixlowpan_frag_sfr_congure_snd_free(fb->sfr.congure);
+-    fb->sfr.congure = NULL;
++    fb->sfr.cwnd = 0;
+ #else
+     (void)fb;
+ #endif
+ }
+ 
+-/**
+- * @brief   Initializes a CongURE state object in a fragmentation buffer entry
+- *
+- * @param[in] fb    A fragmentation buffer entry
+- *
+- * @note    Does not do anything without the module
+- *          `gnrc_sixlowpan_frag_sfr_congure`
+- */
+-static inline void gnrc_sixlowpan_frag_sfr_congure_snd_init(gnrc_sixlowpan_frag_fb_t *fb)
++static inline congure_wnd_size_t _calc_init_wnd(gnrc_sixlowpan_frag_fb_t *fb)
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    fb->sfr.congure->driver->init(fb->sfr.congure, fb);
+-#else
+-    (void)fb;
+-#endif
++    /* see https://tools.ietf.org/html/rfc5681#section-3.1 */
++    if (fb->sfr.mss > CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE) {
++        return 2 * fb->sfr.mss;
++    }
++    else if (fb->sfr.mss <= CONFIG_GNRC_SIXLOWPAN_SFR_MIN_WIN_SIZE) {
++        return 4 * fb->sfr.mss;
++    }
++    else {
++        return 3 * fb->sfr.mss;
++    }
+ }
+ 
+ /**
+@@ -132,19 +81,50 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_init(gnrc_sixlowpan_frag_
+ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_setup(gnrc_sixlowpan_frag_fb_t *fb)
+ {
+ #if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    if (fb->sfr.congure == NULL) {
+-        fb->sfr.congure = gnrc_sixlowpan_frag_sfr_congure_snd_get();
+-        assert(fb->sfr.congure);
+-        gnrc_sixlowpan_frag_sfr_congure_snd_init(fb);
+-        if (fb->sfr.congure->cwnd > CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE) {
+-            fb->sfr.congure->cwnd = CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE;
+-        }
++    if (fb->sfr.cwnd == 0) {
++        fb->sfr.mss = 1U;
++        fb->sfr.last_ack = UINT32_MAX;
++        fb->sfr.cwnd = _calc_init_wnd(fb);
++        fb->sfr.ssthresh = 32U;
++        fb->sfr.dup_acks = 0;
+     }
+ #else
+     (void)fb;
+ #endif
+ }
+ 
++static inline int _snd_in_fast_retransmit(gnrc_sixlowpan_frag_fb_t *fb)
++{
++    return (fb->sfr.dup_acks >= 1);
++}
++
++static inline void _fr_cwnd_dec(gnrc_sixlowpan_frag_fb_t *fb)
++{
++    /* max(c->mss * 2, c->super.cwnd / 2) */
++    fb->sfr.ssthresh = ((fb->sfr.mss * 4) > fb->sfr.cwnd)
++                     ? (fb->sfr.mss * 2) : (fb->sfr.cwnd / 2);
++    fb->sfr.cwnd = fb->sfr.ssthresh + (3 * fb->sfr.mss);
++}
++
++static inline void _enforce_fast_retransmit(gnrc_sixlowpan_frag_fb_t *fb)
++{
++    if (!_snd_in_fast_retransmit(fb)) {
++        fb->sfr.dup_acks = 1U;
++    }
++    _fr_cwnd_dec(fb);
++}
++
++static inline void _dec_flight_size(gnrc_sixlowpan_frag_fb_t *fb)
++{
++    /* check for integer underflow */
++    if ((fb->sfr.in_flight_size - 1) > fb->sfr.in_flight_size) {
++        fb->sfr.in_flight_size = 0U;
++    }
++    else {
++        fb->sfr.in_flight_size--;
++    }
++}
++
+ /**
+  * @brief   Checks if given fragmentation buffer entry is within congestion
+  *          window
+@@ -164,7 +144,7 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_setup(gnrc_sixlowpan_frag
+ static inline bool gnrc_sixlowpan_frag_sfr_congure_snd_in_cwnd(gnrc_sixlowpan_frag_fb_t *fb)
+ {
+ #if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    return fb->sfr.frags_sent < fb->sfr.congure->cwnd;
++    return fb->sfr.frags_sent < fb->sfr.cwnd;
+ #else
+     return fb->sfr.frags_sent < CONFIG_GNRC_SIXLOWPAN_SFR_OPT_WIN_SIZE;
+ #endif
+@@ -190,7 +170,7 @@ static inline bool gnrc_sixlowpan_frag_sfr_congure_snd_next_in_cwnd(gnrc_sixlowp
+ {
+ #if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+     return (fb->sfr.frags_sent + GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT)
+-        < fb->sfr.congure->cwnd;
++        < fb->sfr.cwnd;
+ #else
+     return (fb->sfr.frags_sent + GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT)
+         < CONFIG_GNRC_SIXLOWPAN_SFR_OPT_WIN_SIZE;
+@@ -235,21 +215,7 @@ static inline uint32_t gnrc_sixlowpan_frag_sfr_congure_snd_inter_frame_gap(
+         gnrc_sixlowpan_frag_fb_t *fb
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    if (fb != NULL) {
+-        congure_snd_t *c = fb->sfr.congure;
+-        int32_t res = c->driver->inter_msg_interval(
+-            c, GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT
+-        );
+-
+-        if ((res >= 0) &&
+-            ((unsigned)res >= CONFIG_GNRC_SIXLOWPAN_SFR_INTER_FRAME_GAP_US)) {
+-            return (uint32_t)res;
+-        }
+-    }
+-#else
+     (void)fb;
+-#endif
+     return CONFIG_GNRC_SIXLOWPAN_SFR_INTER_FRAME_GAP_US;
+ }
+ 
+@@ -268,13 +234,16 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_sent(
+         gnrc_sixlowpan_frag_fb_t *fb
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
+-
+-    c->driver->report_msg_sent(c, GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT);
+-#else
+-    (void)fb;
+-#endif
++    if ((fb->sfr.in_flight_size + 1) < fb->sfr.cwnd) {
++        fb->sfr.in_flight_size++;
++    }
++    else {
++        /* state machine is dependent on flight size being smaller or equal
++         * to cwnd as such cap cwnd here, in case caller reports a message in
++         * flight that was marked as lost, but the caller is using a later
++         * message to send another ACK. */
++        fb->sfr.in_flight_size = fb->sfr.cwnd;
++    }
+ }
+ 
+ /**
+@@ -292,13 +261,27 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_discard(
+         gnrc_sixlowpan_frag_fb_t *fb
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
++    assert(1 <= fb->sfr.in_flight_size);
+ 
+-    c->driver->report_msg_discarded(c, GNRC_SIXLOWPAN_FRAG_SFR_CONGURE_UNIT);
+-#else
+-    (void)fb;
+-#endif
++    _dec_flight_size(fb);
++}
++
++static inline int _check_resends(clist_node_t *node, void *ctx)
++{
++    congure_snd_msg_t *msg = (congure_snd_msg_t *)node;
++
++    (void)ctx;
++    if (msg->resends == 0) {
++        return 1;
++    }
++    return 0;
++}
++
++static inline int _mark_msg_lost(clist_node_t *node, void *ctx)
++{
++    (void)node;
++    _dec_flight_size(ctx);
++    return 0;
+ }
+ 
+ /**
+@@ -316,13 +299,23 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_frags_timeout(
+         gnrc_sixlowpan_frag_fb_t *fb
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
++    congure_snd_msg_t *msgs = (congure_snd_msg_t *)(&fb->sfr.window);
+ 
+-    c->driver->report_msgs_timeout(c, (congure_snd_msg_t *)(&fb->sfr.window));
+-#else
+-    (void)fb;
+-#endif
++    if (msgs) {
++        if (clist_foreach(&msgs->super, _check_resends, NULL)) {
++            /* see https://tools.ietf.org/html/rfc5681#section-3.1 equation 4 */
++            fb->sfr.ssthresh = ((fb->sfr.in_flight_size / 2) > (fb->sfr.mss * 2))
++                          ? (fb->sfr.in_flight_size / 2)
++                          : (fb->sfr.mss * 2);
++        }
++        /* do decrementing of flight size _after_ ssthresh reduction,
++         * since we use the in_flight_size there */
++        clist_foreach(&msgs->super, _mark_msg_lost, fb);
++        /* > Furthermore, upon a timeout (as specified in [RFC2988]) cwnd
++         * > MUST be set to no more than the loss window, LW, which equals
++         * > 1 full-sized segment (regardless of the value of IW). */
++        fb->sfr.cwnd = fb->sfr.mss;
++    }
+ }
+ 
+ /**
+@@ -342,14 +335,8 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_frags_lost(
+         gnrc_sixlowpan_frag_fb_t *fb, congure_snd_msg_t *frags
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
+-
+-    c->driver->report_msgs_lost(c, frags);
+-#else
+-    (void)fb;
+-    (void)frags;
+-#endif
++    clist_foreach(&frags->super, _mark_msg_lost, fb);
++    _enforce_fast_retransmit(fb);
+ }
+ 
+ /**
+@@ -371,18 +358,38 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_frag_acked(
+         congure_snd_ack_t *ack
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
+-
+-    c->driver->report_msg_acked(c, frag, ack);
+-    if (c->cwnd > CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE) {
+-        c->cwnd = CONFIG_GNRC_SIXLOWPAN_SFR_MAX_WIN_SIZE;
++    if (seq32_compare(ack->id, fb->sfr.last_ack) <= 0) {
++        /* check for duplicate ACK according to
++         * https://tools.ietf.org/html/rfc5681#section-2
++         * An acknowledgment is considered a "duplicate" [...] when
++         * (a) the receiver of the ACK has outstanding data, */
++        if ((fb->sfr.in_flight_size > 0) &&
++            /* (b) the incoming acknowledgment carries no data, */
++            (ack->size == 0) &&
++            /* (c) the SYN and FIN bits are both off */
++            (ack->clean) &&
++            /* (d) the acknowledgment number is equal to the greatest
++             *     acknowledgment received on the given connection, and */
++            (ack->id == fb->sfr.last_ack)) {
++            fb->sfr.dup_acks++;
++        }
++    }
++    else {
++        fb->sfr.dup_acks = 0;
++        fb->sfr.last_ack = ack->id;
++        if (fb->sfr.cwnd < fb->sfr.ssthresh) {
++            fb->sfr.cwnd += (fb->sfr.in_flight_size < fb->sfr.mss)
++                             ? fb->sfr.in_flight_size
++                             : fb->sfr.mss;
++        }
++        else {
++            /* congestion avoidance */
++            fb->sfr.cwnd += fb->sfr.mss;
++        }
++        (void)frag;
++        assert(frag->size <= fb->sfr.in_flight_size);
++        _dec_flight_size(fb);
+     }
+-#else
+-    (void)fb;
+-    (void)frag;
+-    (void)ack;
+-#endif
+ }
+ 
+ /**
+@@ -402,14 +409,12 @@ static inline void gnrc_sixlowpan_frag_sfr_congure_snd_report_ecn(
+         gnrc_sixlowpan_frag_fb_t *fb, uint32_t time
+     )
+ {
+-#if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE)
+-    congure_snd_t *c = fb->sfr.congure;
++    unsigned abe_product = (fb->sfr.in_flight_size * CONFIG_CONGURE_ABE_MULTIPLIER_NUMERATOR_DEFAULT) /
++                           CONFIG_CONGURE_ABE_MULTIPLIER_DENOMINATOR_DEFAULT;
+ 
+-    c->driver->report_ecn_ce(c, (ztimer_now_t)time);
+-#else
+-    (void)fb;
+     (void)time;
+-#endif
++    fb->sfr.ssthresh = (abe_product > (fb->sfr.mss * 2)) ? abe_product : (fb->sfr.mss * 2);
++    fb->sfr.cwnd = fb->sfr.ssthresh;
+ }
+ 
+ #ifdef __cplusplus
+diff --git a/sys/include/net/gnrc/sixlowpan/frag/sfr_types.h b/sys/include/net/gnrc/sixlowpan/frag/sfr_types.h
+index d2f417ddd4..25c0ed8c1f 100644
+--- a/sys/include/net/gnrc/sixlowpan/frag/sfr_types.h
++++ b/sys/include/net/gnrc/sixlowpan/frag/sfr_types.h
+@@ -46,7 +46,19 @@ typedef union {
+  */
+ typedef struct gnrc_sixlowpan_frag_sfr_fb {
+ #if IS_USED(MODULE_GNRC_SIXLOWPAN_FRAG_SFR_CONGURE) || DOXYGEN
+-    congure_snd_t *congure;     /**< state object for [CongURE](@ref sys_congure) */
++    uint32_t last_ack;              /**< ID of the last ACK reported */
++    congure_wnd_size_t cwnd;        /**< Congestion window size */
++    /**
++     * @brief Maximum segment size of the sender in caller-defined units
++     */
++    congure_wnd_size_t mss;
++    congure_wnd_size_t ssthresh;    /**< Slow-start threshold */
++    /**
++     * @brief   Sum of caller-defined units of message sizes of all messages
++     *          that are yet not ack'd or declared lost
++     */
++    uint16_t in_flight_size;
++    uint8_t dup_acks;               /**< Number of duplicate ACKs reported */
+ #endif
+     /**
+      * @brief   Acknowledgment request timeout event
+-- 
+2.31.1
+
