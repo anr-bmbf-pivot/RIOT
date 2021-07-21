@@ -703,6 +703,11 @@ ifneq (,$(filter gcoap_dns,$(USEMODULE)))
   USEMODULE += sock_util
 endif
 
+ifneq (,$(filter gcoap_dns_get,$(USEMODULE)))
+  USEMODULE += base64url
+  USEMODULE += ut_process
+endif
+
 ifneq (,$(filter gcoap_dns_oscore,$(USEMODULE)))
   EXTERNAL_MODULE_DIRS += $(abspath $(RIOTBASE)/../liboscore/backends/riot-modules)
   USEMODULE += oscore

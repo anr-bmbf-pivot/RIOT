@@ -50,7 +50,7 @@ if KCONFIG_USEMODULE_GCOAP_DNS
 config GCOAP_DNS_SERVER_URI_LEN
     int "Maximum length of the URI template for the DNS server"
     default 64
-    range 9 65535  # 14 == len("coaps:///")
+    range 14 65535  # 14 == len("coaps://{?dns}")
 
 config GCOAP_DNS_CREDS_MAX
     int "Maximum number of credentials that can be added with @ref gcoap_dns_cred_add()"

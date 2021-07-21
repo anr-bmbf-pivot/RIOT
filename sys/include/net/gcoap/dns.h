@@ -144,7 +144,7 @@ struct gcoap_dns_ctx {
      * - -ETIMEDOUT, if CoAP request timed out.
      */
     int res;
-#if IS_USED(MODULE_GCOAP_DNS_ASYNC)
+#if IS_USED(MODULE_GCOAP_DNS_GET) || IS_USED(MODULE_GCOAP_DNS_POST) || IS_USED(MODULE_GCOAP_DNS_ASYNC)
     uint8_t flags;          /**< Flags */
 #endif
     uint8_t dns_buf_len;    /**< Length of gcoap_dns_ctx_t::dns_buf */
@@ -168,6 +168,8 @@ struct gcoap_dns_ctx {
     uint16_t req_tag;
 #endif
 };
+
+int gcoap_dns_query_method(const char *domain_name, void *addr_out, int family, uint8_t method);
 
 /**
  * @brief   Query a domain name via CoAP synchronously
@@ -198,7 +200,10 @@ struct gcoap_dns_ctx {
  * @return  -ENOTSUP, if credential can not be added for to client.
  * @return  -ETIMEDOUT, if CoAP request timed out.
  */
-int gcoap_dns_query(const char *domain_name, void *addr_out, int family);
+static inline int gcoap_dns_query(const char *domain_name, void *addr_out, int family)
+{
+    return gcoap_dns_query_method(domain_name, addr_out, family, COAP_METHOD_FETCH);
+}
 
 
 /**

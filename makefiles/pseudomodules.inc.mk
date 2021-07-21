@@ -73,6 +73,8 @@ PSEUDOMODULES += gcoap_dtls
 ## Enable @ref net_gcoap_dns
 PSEUDOMODULES += gcoap_dns
 PSEUDOMODULES += gcoap_dns_async
+PSEUDOMODULES += gcoap_dns_get
+PSEUDOMODULES += gcoap_dns_post
 ## Enable the @ref gcoap_dns_server_proxy_set function
 PSEUDOMODULES += gcoap_dns_proxied
 PSEUDOMODULES += gcoap_dns_oscore
