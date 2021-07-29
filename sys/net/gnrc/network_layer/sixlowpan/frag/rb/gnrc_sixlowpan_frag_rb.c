@@ -30,6 +30,7 @@
 #include "net/gnrc/sixlowpan/frag/vrb.h"
 #include "net/sixlowpan.h"
 #include "net/sixlowpan/sfr.h"
+#include "periph/rtt.h"
 #include "thread.h"
 #include "xtimer.h"
 #include "utlist.h"
@@ -595,7 +596,11 @@ static int _rbuf_get(const void *src, size_t src_len,
 {
     gnrc_sixlowpan_frag_rb_t *res = NULL, *oldest = NULL;
     uint32_t now_usec = xtimer_now_usec();
+    long unsigned now_rtt;
 
+    if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+        now_rtt = RTT_TICKS_TO_MS(rtt_get_counter());
+    }
     for (unsigned int i = 0; i < CONFIG_GNRC_SIXLOWPAN_FRAG_RBUF_SIZE; i++) {
         /* check first if entry already available */
         if ((rbuf[i].pkt != NULL) && (rbuf[i].super.tag == tag) &&
@@ -710,6 +715,9 @@ static int _rbuf_get(const void *src, size_t src_len,
         /* clean first few bytes for later look-ups */
         memset(res->pkt->data, 0, sizeof(uint64_t));
     }
+    if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+        printf("%lu;er;%u\n", now_rtt, tag);
+    }
     res->super.datagram_size = size;
     res->super.arrival = now_usec;
     memcpy(res->super.src, src, src_len);
@@ -810,6 +818,12 @@ int gnrc_sixlowpan_frag_rb_dispatch_when_complete(gnrc_sixlowpan_frag_rb_t *rbuf
     int res = (rbuf->super.current_size == rbuf->super.datagram_size);
 
     if (res) {
+        long unsigned now_rtt;
+        uint8_t *payload;
+
+        if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+            now_rtt = RTT_TICKS_TO_MS(rtt_get_counter());
+        }
         gnrc_pktsnip_t *netif = gnrc_netif_hdr_build(rbuf->super.src,
                                                      rbuf->super.src_len,
                                                      rbuf->super.dst,
@@ -836,6 +850,11 @@ int gnrc_sixlowpan_frag_rb_dispatch_when_complete(gnrc_sixlowpan_frag_rb_t *rbuf
         gnrc_sixlowpan_frag_stats_get()->fragments += _count_frags(rbuf);
         gnrc_sixlowpan_frag_stats_get()->datagrams++;
 #endif
+        if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+            payload = rbuf->pkt->data;
+            printf("%lu;lr;%u;%u\n", now_rtt, rbuf->super.tag,
+                   payload[rbuf->pkt->size - 1]);
+        }
         gnrc_sixlowpan_dispatch_recv(rbuf->pkt, NULL, 0);
         _tmp_rm(rbuf);
     }

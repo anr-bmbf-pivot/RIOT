@@ -29,6 +29,7 @@
 #include "net/gnrc/sixlowpan/iphc.h"
 #include "net/gnrc/netif.h"
 #include "net/sixlowpan.h"
+#include "periph/rtt.h"
 
 #define ENABLE_DEBUG 0
 #include "debug.h"
@@ -50,6 +51,10 @@ kernel_pid_t gnrc_sixlowpan_init(void)
         return _pid;
     }
 
+    if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+        rtt_init();
+        rtt_poweron();
+    }
     _pid = thread_create(_stack, sizeof(_stack), GNRC_SIXLOWPAN_PRIO,
                          THREAD_CREATE_STACKTEST, _event_loop, NULL, "6lo");
 
@@ -110,6 +115,12 @@ void gnrc_sixlowpan_multiplex_by_size(gnrc_pktsnip_t *pkt,
     assert(pkt != NULL);
     assert(netif != NULL);
     size_t datagram_size = gnrc_pkt_len(pkt->next);
+    long unsigned now_rtt;
+    uint8_t *payload;
+
+    if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+        now_rtt = RTT_TICKS_TO_MS(rtt_get_counter());
+    }
     DEBUG("6lo: iface->sixlo.max_frag_size = %u for interface %i\n",
           netif->sixlo.max_frag_size, netif->pid);
     if ((netif->sixlo.max_frag_size == 0) ||
@@ -138,6 +149,10 @@ void gnrc_sixlowpan_multiplex_by_size(gnrc_pktsnip_t *pkt,
         fbuf->pkt = pkt;
         fbuf->datagram_size = orig_datagram_size;
         fbuf->tag = gnrc_sixlowpan_frag_fb_next_tag();
+        if (IS_ACTIVE(HWR_MEASURE_TTREASS)) {
+            payload = pkt->next->next->next->data;
+            printf("%lu;ef;%u;%u\n", now_rtt, fbuf->tag, payload[pkt->next->next->next->size - 1]);
+        }
         /* Sending the first fragment has an offset==0 */
         fbuf->offset = 0;
 #ifdef MODULE_GNRC_SIXLOWPAN_FRAG_HINT

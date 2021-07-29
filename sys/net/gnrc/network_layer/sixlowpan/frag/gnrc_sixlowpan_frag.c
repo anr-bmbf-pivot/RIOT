@@ -28,6 +28,7 @@
 #include "net/gnrc/sixlowpan/internal.h"
 #include "net/gnrc/tx_sync.h"
 #include "net/sixlowpan.h"
+#include "periph/rtt.h"
 #include "utlist.h"
 
 #define ENABLE_DEBUG 0
@@ -292,6 +293,9 @@ void gnrc_sixlowpan_frag_send(gnrc_pktsnip_t *pkt, void *ctx, unsigned page)
         goto error;
     }
     fbuf->offset += res;
+    if (IS_ACTIVE(HWR_MEASURE_TTREASS) && (fbuf->offset >= payload_len)) {
+        printf("%lu;lf;%u\n", (long unsigned)RTT_TICKS_TO_MS(rtt_get_counter()), fbuf->tag);
+    }
     if (!gnrc_sixlowpan_frag_fb_send(fbuf)) {
         DEBUG("6lo frag: message queue full, can't issue next fragment "
               "sending\n");
