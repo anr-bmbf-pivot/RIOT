@@ -36,6 +36,10 @@
 #include "net/coap.h"
 #include "net/gcoap.h"
 
+#if IS_USED(MODULE_GCOAP_DNS_OSCORE)
+#include "oscore/helpers.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -83,6 +87,89 @@ extern "C" {
 /** @} */
 
 /**
+ * @brief   Forward type declaration of struct gcoap_dns_ctx
+ */
+typedef struct gcoap_dns_ctx gcoap_dns_ctx_t;
+
+/**
+ * @brief   Callback for asynchronous operation
+ *
+ * @note    Requires module `gcoap_dns_async` to be used.
+ *
+ * @param[in] The context for the asynchronous DNS query.
+ */
+typedef void (*gcoap_dns_async_cb_t)(gcoap_dns_ctx_t *ctx);
+
+/**
+ * @brief   Context for a DNS query-response-pair.
+ */
+struct gcoap_dns_ctx {
+    union {
+        /**
+         * @brief   Synchronization mutex for synchronous use
+         */
+        mutex_t resp_wait;
+        /**
+         * @brief   Callback for asynchronous use
+         */
+        gcoap_dns_async_cb_t cb;
+    } sync;                 /**< Synchronization primitives */
+    /**
+     * @brief The CoAP request packet
+     *
+     * Only needs to have coap_pkt_t::payload and coap_pkt_t::payload_len
+     * initialized.
+     */
+    coap_pkt_t *pkt;
+#if IS_USED(MODULE_DNS_CACHE) || defined(DOXYGEN)
+    /**
+     * @brief   The queried hostname
+     *
+     * Only required for DNS caching and thus only available with module @ref net_dns_cache
+     */
+    const char *domain_name;
+#endif
+    void *dns_buf;          /**< The buffer for the DNS message exchange */
+    void *addr_out;         /**< Pointer to the resulting address */
+    /**
+     * @brief   Status for the DNS message exchange
+     *
+     * - length of gcoap_dns_ctx_t::addr_out in bytes on success
+     * - -EBADMSG, when receiving erroneous response or response containing
+     * - -EDESTADDRREQ, if CoAP response was received from an unexpected remote.
+     * - -EINVAL, when block-wise transfer can not be completed.
+     * - -ENOBUFS, if length of received CoAP body is greater than
+     *   @ref CONFIG_DNS_MSG_LEN.
+     * - -ENOMSG, if CoAP response did not contain a DNS response.
+     * - -ETIMEDOUT, if CoAP request timed out.
+     */
+    int res;
+#if IS_USED(MODULE_GCOAP_DNS_ASYNC)
+    uint8_t flags;          /**< Flags */
+#endif
+    uint8_t dns_buf_len;    /**< Length of gcoap_dns_ctx_t::dns_buf */
+    int8_t family;          /**< Address family to resolve */
+    /**
+     * @brief The current block number for block-wise transfer
+     *
+     * Leave unset on function call.
+     */
+    uint8_t cur_blk_num;
+#if IS_USED(MODULE_GCOAP_DNS_OSCORE)
+    oscore_requestid_t oscore_request_id;
+#endif
+#if IS_USED(MODULE_GCOAP_DNS_ASYNC) || IS_USED(MODULE_GCOAP_DTLS) || defined(DOXYGEN)
+    /**
+     * @brief   Request tag to rule out potential request reordering attacks
+     *
+     * @todo    Also use for OSCORE when using block-wise support for OSCORE
+     *          was added
+     */
+    uint16_t req_tag;
+#endif
+};
+
+/**
  * @brief   Query a domain name via CoAP synchronously
  *
  * @param[in] domain_name   A '\0'-terminated domain name. Must not be NULL.
@@ -99,7 +186,9 @@ extern "C" {
  * @return  -ECONNREFUSED, if no URI is set for the client (see @ref gcoap_dns_server_uri_set()).
  * @return  -EDESTADDRREQ, if CoAP response was received from an unexpected
  *          remote.
- * @return  -EHOSTUNREACH, if the hostname of the URI can not be resolved
+ * @return  -EHOSTUNREACH, if the hostname of the URI template can not be
+ *          resolved
+ * @return  -EINVAL, if the URI template was not processable.
  * @return  -ENOBUFS, if there was not enough buffer space for the request.
  * @return  -ENOBUFS, if length of received CoAP body is greater than
  *          @ref CONFIG_DNS_MSG_LEN.
@@ -110,6 +199,41 @@ extern "C" {
  * @return  -ETIMEDOUT, if CoAP request timed out.
  */
 int gcoap_dns_query(const char *domain_name, void *addr_out, int family);
+
+
+/**
+ * @brief   Query a domain name via CoAP asynchronously
+ *
+ * @note    Only available with module `gcoap_dns_async` compiled in.
+ *
+ * @param[in] domain_name   A '\0'-terminated domain name. Must not be NULL.
+ * @param[out] addr_out     The resolved address. Must not be NULL.
+ * @param[in] family        The desired address family for @p addr_out.
+ *                          @ref AF_UNSPEC for any address family (an IPv6
+ *                          address will take preference over an IPv4 address).
+ *
+ * @return  length of @p addr_out in bytes on success
+ * @return  -EAFNOSUPPORT, if the hostname of the URI resolves to an unknown address family.
+ * @return  -EBADMSG, when receiving erroneous response or response containing
+ *          an error code.
+ * @return  -ECONNABORTED, if CoAP request cannot be sent.
+ * @return  -ECONNREFUSED, if no URI is set for the client (see @ref gcoap_dns_server_uri_set()).
+ * @return  -EDESTADDRREQ, if CoAP response was received from an unexpected
+ *          remote.
+ * @return  -EHOSTUNREACH, if the hostname of the URI template can not be
+ *          resolved
+ * @return  -EINVAL, if the URI template was not processable.
+ * @return  -ENOBUFS, if there was not enough buffer space for the request.
+ * @return  -ENOBUFS, if length of received CoAP body is greater than
+ *          @ref CONFIG_DNS_MSG_LEN.
+ * @return  -ENOENT, if Zone-ID of the URI can not be found locally.
+ * @return  -ENOMSG, if CoAP response did not contain a DNS response.
+ * @return  -ENOTRECOVERABLE, on gCoAP-internal error.
+ * @return  -ENOTSUP, if credential can not be added for to client.
+ * @return  -ENOTSUP, if module `gcoap_dns_async` is not compiled in.
+ * @return  -ETIMEDOUT, if CoAP request timed out.
+ */
+int gcoap_dns_query_async(const char *domain_name, gcoap_dns_ctx_t *ctx);
 
 /**
  * @brief   Sets and checks a URI for a DoC server
