@@ -39,6 +39,7 @@ extern "C" {
 #define COAP_OPT_ETAG           (4)
 #define COAP_OPT_OBSERVE        (6)
 #define COAP_OPT_LOCATION_PATH  (8)
+#define COAP_OPT_OSCORE         (9)
 #define COAP_OPT_URI_PATH       (11)
 #define COAP_OPT_CONTENT_FORMAT (12)
 #define COAP_OPT_MAX_AGE        (14)
@@ -49,6 +50,7 @@ extern "C" {
 #define COAP_OPT_BLOCK1         (27)
 #define COAP_OPT_PROXY_URI      (35)
 #define COAP_OPT_PROXY_SCHEME   (39)
+#define COAP_OPT_ECHO           (252)
 /** @} */
 
 /**

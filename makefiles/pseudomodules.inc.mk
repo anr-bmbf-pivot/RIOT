@@ -74,6 +74,7 @@ PSEUDOMODULES += gcoap_dtls
 PSEUDOMODULES += gcoap_dns
 ## Enable the @ref gcoap_dns_server_proxy_set function
 PSEUDOMODULES += gcoap_dns_proxied
+PSEUDOMODULES += gcoap_dns_oscore
 PSEUDOMODULES += fido2_tests
 PSEUDOMODULES += gnrc_dhcpv6_%
 PSEUDOMODULES += gnrc_ipv6_auto_subnets_auto_init
