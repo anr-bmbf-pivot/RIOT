@@ -42,6 +42,8 @@ static struct dns_cache_entry {
 } cache[CONFIG_DNS_CACHE_SIZE];
 static mutex_t cache_mutex = MUTEX_INIT;
 
+extern int ts_printf(const char *format, ...);
+
 #if IS_ACTIVE(CONFIG_DNS_CACHE_A) && IS_ACTIVE(CONFIG_DNS_CACHE_AAAA)
 BITFIELD(cache_is_v6, CONFIG_DNS_CACHE_SIZE);
 
@@ -142,6 +144,7 @@ int dns_cache_query(const char *domain_name, void *addr_out, int family)
             DEBUG("dns_cache[%u] hit\n", i);
             memcpy(addr_out, &cache[i].addr, _get_len(i));
             res = _get_len(i);
+            ts_printf("D;%.*s\n", 5, domain_name);
             break;
         }
     }

@@ -81,6 +81,8 @@ ssize_t _ctx_recvd_echo_size = -1;
 static uint64_t _userctx_last_persisted;
 #endif
 
+extern int ts_printf(const char *format, ...);
+
 static inline bool _dns_server_uri_isset(void);
 #if IS_USED(MODULE_GCOAP_DTLS)
 static void _remove_cred(sock_dtls_t *sock, _cred_t *cred);
@@ -667,8 +669,9 @@ static int _do_block(coap_pkt_t *pdu, const sock_udp_ep_t *remote,
 
     coap_block1_finish(&slicer);
 
+    ts_printf("b;%u\n", pdu->hdr->id);
     if ((len = _send(pdu->hdr, len, remote, slicer.start == 0, context, tl_type)) <= 0) {
-        DEBUG("gcoap_dns: msg send failed: %d\n", (int)len);
+        ts_printf("e;%d\n", (int)-len);
         return len;
     }
     return len;
@@ -963,6 +966,7 @@ static int _oscore_resp_handler(coap_pkt_t *pdu, gcoap_dns_ctx_t *context)
                 }
             }
             oscore_msg_protected_optiter_finish(&oscmsg, &iter);
+            ts_printf("u;%u\n", context->pkt->hdr->id);
             context->pkt->payload = (void *)context->pkt->hdr;
             context->pkt->payload_len = CONFIG_GCOAP_DNS_PDU_BUF_SIZE;
             return _req_oscore(context, _decode_ctx_method(context));
@@ -1018,12 +1022,19 @@ static void _resp_handler(const gcoap_request_memo_t *memo, coap_pkt_t *pdu,
     int family = context->family;
 
     if (memo->state == GCOAP_MEMO_TIMEOUT) {
-        DEBUG("gcoap_dns: CoAP request timed out\n");
+        const coap_hdr_t *hdr;
+        if (memo->send_limit == GCOAP_SEND_LIMIT_NON) {
+            hdr = (coap_hdr_t *)(&memo->msg.hdr_buf[0]);
+        }
+        else {
+            hdr = (coap_hdr_t *)memo->msg.data.pdu_buf;
+        }
+        ts_printf("x;%u\n", hdr->id);
         context->res = -ETIMEDOUT;
         goto unlock;
     }
     else if (memo->state != GCOAP_MEMO_RESP) {
-        DEBUG("gcoap_dns: error in response\n");
+        ts_printf("e;%d\n", EBADMSG);
         context->res = -EBADMSG;
         goto unlock;
     }
@@ -1059,6 +1070,7 @@ static void _resp_handler(const gcoap_request_memo_t *memo, coap_pkt_t *pdu,
         goto unlock;
     }
     if (coap_get_code_raw(pdu) == COAP_CODE_CONTINUE) {
+        ts_printf("c;%u\n", pdu->hdr->id);
         int res = _do_block(pdu, remote, context);
 
         if (res < 0) {
@@ -1100,6 +1112,7 @@ static void _resp_handler(const gcoap_request_memo_t *memo, coap_pkt_t *pdu,
                 context->res = -ENOTSUP;
                 goto unlock;
             }
+            ts_printf("c2;%u\n", pdu->hdr->id);
             pdu->payload = (uint8_t *)pdu->hdr;
             pdu->payload_len = CONFIG_GCOAP_DNS_PDU_BUF_SIZE;
             tl_type = _req_init(pdu, &_uri_comp, msg_type == COAP_TYPE_ACK, method);
@@ -1114,6 +1127,7 @@ static void _resp_handler(const gcoap_request_memo_t *memo, coap_pkt_t *pdu,
                 goto unlock;
             }
             len = coap_opt_finish(pdu, COAP_OPT_FINISH_NONE);
+            ts_printf("b2;%u\n", pdu->hdr->id);
             if ((len = _send((uint8_t *)pdu->hdr, len, remote, false, context, tl_type)) <= 0) {
                 DEBUG("gcoap_dns: Unable to request next block: %d\n", len);
                 context->res = len;

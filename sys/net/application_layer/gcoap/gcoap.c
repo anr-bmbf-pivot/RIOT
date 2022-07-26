@@ -53,6 +53,8 @@
 /* End of the range to pick a random timeout */
 #define TIMEOUT_RANGE_END (CONFIG_COAP_ACK_TIMEOUT_MS * CONFIG_COAP_RANDOM_FACTOR_1000 / 1000)
 
+extern int ts_printf(const char *format, ...);
+
 /* Internal functions */
 static void *_event_loop(void *arg);
 static void _on_sock_udp_evt(sock_udp_t *sock, sock_async_flags_t type, void *arg);
@@ -462,6 +464,7 @@ static void _process_coap_pdu(gcoap_socket_t *sock, sock_udp_ep_t *remote, sock_
                         /* update max_age from response and send cached response */
                         uint32_t max_age = 60;
 
+                        ts_printf("V;%u\nC;%u\n", pdu.hdr->id, pdu.hdr->id);
                         coap_opt_get_uint(&pdu, COAP_OPT_MAX_AGE, &max_age);
                         ce->max_age = ztimer_now(ZTIMER_SEC) + max_age;
                         /* copy all options and possible payload from the cached response
@@ -555,6 +558,14 @@ static void _on_resp_timeout(void *arg) {
             return;
         }
 
+        const coap_hdr_t *hdr;
+        if (memo->send_limit == GCOAP_SEND_LIMIT_NON) {
+            hdr = (coap_hdr_t *)(&memo->msg.hdr_buf[0]);
+        }
+        else {
+            hdr = (coap_hdr_t *)memo->msg.data.pdu_buf;
+        }
+        ts_printf("t;%u\n", hdr->id);
         ssize_t bytes = _tl_send(&memo->socket, memo->msg.data.pdu_buf,
                                  memo->msg.data.pdu_len, &memo->remote_ep, NULL);
         if (bytes <= 0) {
@@ -1283,6 +1294,7 @@ static bool _cache_lookup(gcoap_request_memo_t *memo,
         if (*ce &&
             ((*ce)->request_method == coap_get_code(pdu)) &&
             !nanocoap_cache_entry_is_stale(*ce, now)) {
+            ts_printf("t;%u\nC;%u\n", pdu->hdr->id, pdu->hdr->id);
             return true;
         }
     }
@@ -1583,6 +1595,14 @@ ssize_t gcoap_req_send_tl(const uint8_t *buf, size_t len,
     }
 
     if (res == 0) {
+        const coap_hdr_t *hdr;
+        if (memo->send_limit == GCOAP_SEND_LIMIT_NON) {
+            hdr = (coap_hdr_t *)(&memo->msg.hdr_buf[0]);
+        }
+        else {
+            hdr = (coap_hdr_t *)memo->msg.data.pdu_buf;
+        }
+        ts_printf("t;%u\n", hdr->id);
         res = _tl_send(&socket, buf, len, remote, NULL);
     }
     if (res <= 0) {
