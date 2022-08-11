@@ -993,7 +993,15 @@ static int _oscore_resp_handler(coap_pkt_t *pdu, gcoap_dns_ctx_t *context)
                 if (coap_opt_get_uint(pdu, COAP_OPT_MAX_AGE, &max_age) < 0) {
                     max_age = 60;
                 }
-                ttl += max_age;
+                if (IS_USED(MODULE_GCOAP_DNS_DOH_LIKE)) {
+                    if (max_age < ttl) {
+                        ttl = ttl - (ttl - max_age);
+                    }
+                    /* else keep TTL as is */
+                }
+                else {
+                    ttl += max_age;
+                }
                 dns_cache_add(_domain_name_from_ctx(context), context->addr_out, context->res, ttl);
             }
             else if (ENABLE_DEBUG && (context->res < 0)) {
@@ -1155,7 +1163,15 @@ static void _resp_handler(const gcoap_request_memo_t *memo, coap_pkt_t *pdu,
                 if (coap_opt_get_uint(pdu, COAP_OPT_MAX_AGE, &max_age) < 0) {
                     max_age = 60;
                 }
-                ttl += max_age;
+                if (IS_USED(MODULE_GCOAP_DNS_DOH_LIKE)) {
+                    if (max_age < ttl) {
+                        ttl = ttl - (ttl - max_age);
+                    }
+                    /* else keep TTL as is */
+                }
+                else {
+                    ttl += max_age;
+                }
                 dns_cache_add(_domain_name_from_ctx(context), context->addr_out, context->res, ttl);
             }
             else if (ENABLE_DEBUG && (context->res < 0)) {
